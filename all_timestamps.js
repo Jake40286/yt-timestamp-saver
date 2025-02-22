@@ -42,16 +42,17 @@ document.addEventListener("DOMContentLoaded", function() {
 
                 data.ytTimestamps[videoId].forEach((timestampObj, index) => {
                     const timeFormatted = formatTime(timestampObj.time || 0);
-                    
+
+                    const entry = document.createElement("div");
+                    entry.className = "entry";
+
+                    // ✅ Clickable Timestamp Link
                     const link = document.createElement("a");
                     link.href = `https://www.youtube.com/watch?v=${videoId}&t=${timestampObj.time}s`;
                     link.textContent = `[${timeFormatted} Clickable Link]`;
                     link.target = "_blank";
 
-                    const entry = document.createElement("div");
-                    entry.className = "entry";
-
-                    // Create a text input for comments
+                    // ✅ Comment Input Field
                     const commentInput = document.createElement("input");
                     commentInput.type = "text";
                     commentInput.placeholder = "Add a comment...";
@@ -63,8 +64,17 @@ document.addEventListener("DOMContentLoaded", function() {
                         saveComment(videoId, index, commentInput.value);
                     });
 
+                    // ✅ Delete Button
+                    const deleteButton = document.createElement("button");
+                    deleteButton.textContent = "❌ Remove";
+                    deleteButton.style.marginLeft = "10px";
+                    deleteButton.addEventListener("click", function () {
+                        removeTimestamp(videoId, index);
+                    });
+
                     entry.appendChild(link);
                     entry.appendChild(commentInput);
+                    entry.appendChild(deleteButton);
                     videoSection.appendChild(entry);
                 });
 
@@ -86,6 +96,30 @@ document.addEventListener("DOMContentLoaded", function() {
 
             browser.storage.local.set({ ytComments: comments });
         }).catch(error => console.error("Error saving comment:", error));
+    }
+
+    function removeTimestamp(videoId, index) {
+        browser.storage.local.get(["ytTimestamps", "ytComments"]).then(data => {
+            let timestamps = data.ytTimestamps || {};
+            let comments = data.ytComments || {};
+
+            if (!timestamps[videoId]) return;
+
+            timestamps[videoId].splice(index, 1);
+            if (comments[videoId]) {
+                comments[videoId].splice(index, 1);
+            }
+
+            if (timestamps[videoId].length === 0) {
+                delete timestamps[videoId];
+                delete comments[videoId];
+            }
+
+            browser.storage.local.set({ ytTimestamps: timestamps, ytComments: comments }).then(() => {
+                console.log(`✅ Removed timestamp at index ${index} for video ${videoId}`);
+                location.reload();
+            });
+        }).catch(error => console.error("Error removing timestamp:", error));
     }
 
     clearAllButton.addEventListener("click", function() {
