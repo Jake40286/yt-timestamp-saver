@@ -9,13 +9,15 @@
         h2 { text-align: center; }
         .video-section { margin-bottom: 20px; padding: 10px; border: 1px solid #ddd; }
         .entry { margin-bottom: 5px; }
+        .marked-for-deletion { background-color: #ffcccc; } /* 🔴 Highlight in Red */
         button { padding: 5px; cursor: pointer; }
     </style>
 </head>
 <body>
     <h2>All Saved Timestamps</h2>
-    <p>Click a timestamp to jump to it. Use the ❌ button to remove individual timestamps.</p>
+    <p>Click a timestamp to jump to it. Use ❌ to mark for deletion. Click "Save Changes" to apply edits.</p>
     <div id="allTimestampsList"></div>
+    <button id="saveChanges">Save Changes</button>
     <button id="clearAllTimestamps">Clear All</button>
 
     <script src="all_timestamps.js"></script>

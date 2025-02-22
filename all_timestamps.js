@@ -1,6 +1,12 @@
 document.addEventListener("DOMContentLoaded", function() {
     const allTimestampsList = document.getElementById("allTimestampsList");
+    const saveChangesButton = document.getElementById("saveChanges");
     const clearAllButton = document.getElementById("clearAllTimestamps");
+
+    let timestampsData = {};
+    let commentsData = {};
+    let pendingDeletions = new Set(); // Store video IDs marked for deletion
+    let pendingComments = {}; // Temporary comment storage before saving
 
     function formatTime(seconds) {
         const h = Math.floor(seconds / 3600);
@@ -26,21 +32,24 @@ document.addEventListener("DOMContentLoaded", function() {
 
     async function loadTimestamps() {
         allTimestampsList.innerHTML = "";
-        const data = await browser.storage.local.get("ytTimestamps");
-        const commentsData = await browser.storage.local.get("ytComments");
+        const data = await browser.storage.local.get(["ytTimestamps", "ytComments"]);
 
-        if (data.ytTimestamps && Object.keys(data.ytTimestamps).length > 0) {
-            for (const videoId of Object.keys(data.ytTimestamps)) {
+        timestampsData = data.ytTimestamps || {};
+        commentsData = data.ytComments || {};
+
+        if (Object.keys(timestampsData).length > 0) {
+            for (const videoId of Object.keys(timestampsData)) {
                 const videoTitle = await getVideoTitle(videoId);
 
                 const videoSection = document.createElement("div");
                 videoSection.className = "video-section";
+                videoSection.dataset.videoId = videoId;
 
                 const titleElement = document.createElement("h3");
                 titleElement.textContent = videoTitle;
                 videoSection.appendChild(titleElement);
 
-                data.ytTimestamps[videoId].forEach((timestampObj, index) => {
+                timestampsData[videoId].forEach((timestampObj, index) => {
                     const timeFormatted = formatTime(timestampObj.time || 0);
 
                     const entry = document.createElement("div");
@@ -52,27 +61,54 @@ document.addEventListener("DOMContentLoaded", function() {
                     link.textContent = `[${timeFormatted} Clickable Link]`;
                     link.target = "_blank";
 
-                    // ✅ Comment Input Field
+                    // ✅ Comment Display Below
+                    const commentText = document.createElement("p");
+                    commentText.className = "comment-text";
+                    commentText.textContent = commentsData[videoId]?.[index] || "No comment.";
+                    commentText.style.marginTop = "5px";
+                    commentText.style.fontStyle = "italic";
+                    commentText.style.color = "#555";
+
+                    // ✅ Comment Input Field (Hidden Initially)
                     const commentInput = document.createElement("input");
                     commentInput.type = "text";
-                    commentInput.placeholder = "Add a comment...";
-                    commentInput.value = commentsData.ytComments?.[videoId]?.[index] || "";
+                    commentInput.placeholder = "Edit comment...";
+                    commentInput.value = commentsData[videoId]?.[index] || "";
                     commentInput.style.marginLeft = "10px";
+                    commentInput.style.display = "none"; // Hidden by default
 
-                    // Save comment when typing
-                    commentInput.addEventListener("input", function() {
-                        saveComment(videoId, index, commentInput.value);
+                    // ✅ Toggle Input on Click
+                    commentText.addEventListener("click", function () {
+                        commentText.style.display = "none";
+                        commentInput.style.display = "inline-block";
+                        commentInput.focus();
                     });
 
-                    // ✅ Delete Button
+                    // Store comments temporarily before saving
+                    commentInput.addEventListener("input", function() {
+                        if (!pendingComments[videoId]) {
+                            pendingComments[videoId] = [];
+                        }
+                        pendingComments[videoId][index] = commentInput.value;
+                    });
+
+                    // ✅ Hide Input on Blur and Show Updated Comment
+                    commentInput.addEventListener("blur", function () {
+                        commentText.textContent = commentInput.value || "No comment.";
+                        commentText.style.display = "block";
+                        commentInput.style.display = "none";
+                    });
+
+                    // ✅ Delete Button (Marks for Deletion Instead of Removing)
                     const deleteButton = document.createElement("button");
-                    deleteButton.textContent = "❌ Remove";
+                    deleteButton.textContent = "❌ Mark for Deletion";
                     deleteButton.style.marginLeft = "10px";
                     deleteButton.addEventListener("click", function () {
-                        removeTimestamp(videoId, index);
+                        toggleDelete(videoSection);
                     });
 
                     entry.appendChild(link);
+                    entry.appendChild(commentText);
                     entry.appendChild(commentInput);
                     entry.appendChild(deleteButton);
                     videoSection.appendChild(entry);
@@ -85,48 +121,56 @@ document.addEventListener("DOMContentLoaded", function() {
         }
     }
 
-    function saveComment(videoId, index, comment) {
-        browser.storage.local.get("ytComments").then(data => {
-            const comments = data.ytComments || {};
-
-            if (!comments[videoId]) {
-                comments[videoId] = [];
-            }
-            comments[videoId][index] = comment;
-
-            browser.storage.local.set({ ytComments: comments });
-        }).catch(error => console.error("Error saving comment:", error));
+    function toggleDelete(videoSection) {
+        const videoId = videoSection.dataset.videoId;
+        
+        if (pendingDeletions.has(videoId)) {
+            pendingDeletions.delete(videoId);
+            videoSection.classList.remove("marked-for-deletion");
+        } else {
+            pendingDeletions.add(videoId);
+            videoSection.classList.add("marked-for-deletion");
+        }
     }
 
-    function removeTimestamp(videoId, index) {
-        browser.storage.local.get(["ytTimestamps", "ytComments"]).then(data => {
-            let timestamps = data.ytTimestamps || {};
-            let comments = data.ytComments || {};
-
-            if (!timestamps[videoId]) return;
-
-            timestamps[videoId].splice(index, 1);
-            if (comments[videoId]) {
-                comments[videoId].splice(index, 1);
+    function saveChanges() {
+        if (pendingDeletions.size > 0) {
+            for (const videoId of pendingDeletions) {
+                delete timestampsData[videoId];
+                delete commentsData[videoId];
             }
+            pendingDeletions.clear();
+        }
 
-            if (timestamps[videoId].length === 0) {
-                delete timestamps[videoId];
-                delete comments[videoId];
+        // Merge temporary comments into saved comments
+        for (const videoId in pendingComments) {
+            if (!commentsData[videoId]) {
+                commentsData[videoId] = [];
             }
-
-            browser.storage.local.set({ ytTimestamps: timestamps, ytComments: comments }).then(() => {
-                console.log(`✅ Removed timestamp at index ${index} for video ${videoId}`);
-                location.reload();
+            pendingComments[videoId].forEach((comment, index) => {
+                commentsData[videoId][index] = comment;
             });
-        }).catch(error => console.error("Error removing timestamp:", error));
+        }
+
+        browser.storage.local.set({ ytTimestamps: timestampsData, ytComments: commentsData }).then(() => {
+            console.log("✅ Changes saved.");
+            loadTimestamps(); // Refresh the list
+        }).catch(error => console.error("Error saving changes:", error));
     }
 
-    clearAllButton.addEventListener("click", function() {
-        browser.storage.local.remove(["ytTimestamps", "ytComments"]).then(() => {
-            allTimestampsList.innerHTML = "No timestamps saved.";
-        }).catch(error => console.error("Error clearing timestamps:", error));
-    });
+    function clearAllTimestamps() {
+        if (confirm("⚠️ Are you sure you want to clear ALL timestamps? This action cannot be undone!")) {
+            if (confirm("⚠️ This is your last chance! Click OK to permanently delete all timestamps.")) {
+                browser.storage.local.remove(["ytTimestamps", "ytComments"]).then(() => {
+                    allTimestampsList.innerHTML = "No timestamps saved.";
+                    console.log("✅ All timestamps cleared.");
+                }).catch(error => console.error("Error clearing timestamps:", error));
+            }
+        }
+    }
+
+    saveChangesButton.addEventListener("click", saveChanges);
+    clearAllButton.addEventListener("click", clearAllTimestamps);
 
     loadTimestamps();
 });
